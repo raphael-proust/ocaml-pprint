@@ -15,4 +15,5 @@
 
 include PPrintEngine
 include PPrintCombinators
+module Bracket = PPrintBracket
 module OCaml = PPrintOCaml
