@@ -76,19 +76,19 @@ end
 
 type document =
 
-    (* [Empty] is the empty document. *)
+  (* [Empty] is the empty document. *)
 
   | Empty
 
-    (* [Char c] is a document that consists of the single character [c]. We
-       enforce the invariant that [c] is not a newline character. *)
+  (* [Char c] is a document that consists of the single character [c]. We
+     enforce the invariant that [c] is not a newline character. *)
 
   | Char of char
 
-    (* [String (s, ofs, len)] is a document that consists of the portion of
-       the string [s] delimited by the offset [ofs] and the length [len]. We
-       assume, but do not check, that this portion does not contain a newline
-       character. *)
+  (* [String (s, ofs, len)] is a document that consists of the portion of
+     the string [s] delimited by the offset [ofs] and the length [len]. We
+     assume, but do not check, that this portion does not contain a newline
+     character. *)
 
   | String of string * int * int
 
@@ -105,8 +105,8 @@ type document =
 
   | Blank of int
 
-    (* When in flattening mode, [IfFlat (d1, d2)] turns into the document
-       [d1]. When not in flattening mode, it turns into the document [d2]. *)
+  (* When in flattening mode, [IfFlat (d1, d2)] turns into the document
+     [d1]. When not in flattening mode, it turns into the document [d2]. *)
 
   | IfFlat of document * document
 
@@ -123,28 +123,22 @@ type document =
 
   | Cat of document * document
 
-    (* [Nest (j, doc)] is the document [doc], in which the indentation level
-       has been increased by [j], that is, in which [j] blanks have been
-       inserted after every newline character. *)
+  (* [Nest (j, doc)] is the document [doc], in which the indentation level
+     has been increased by [j], that is, in which [j] blanks have been
+     inserted after every newline character. *)
 
   | Nest of int * document
 
-    (* [Group doc] represents an alternative: it is either a flattened form of
-       [doc], in which occurrences of [Group] disappear and occurrences of
-       [IfFlat] resolve to their left branch, or [doc] itself. *)
+  (* [Group doc] represents an alternative: it is either a flattened form of
+     [doc], in which occurrences of [Group] disappear and occurrences of
+     [IfFlat] resolve to their left branch, or [doc] itself. *)
 
   | Group of document
 
-    (* [Column f] is the document obtained by applying [f] to the current
-       column number. *)
+  (* [Probe fn] is the document obtained by applying [fn] to the current
+     indentation and position. *)
 
-  | Column of (int -> document)
-
-    (* [Nesting f] is the document obtained by applying [f] to the current
-       indentation level, that is, the number of blanks that were printed
-       at the beginning of the current line. *)
-
-  | Nesting of (int -> document)
+  | Probe of (indentation:int -> bol:int -> line:int -> column:int -> document)
 
 (* ------------------------------------------------------------------------- *)
 
@@ -239,13 +233,18 @@ let group x =
   Group x
 
 let column f =
-  Column f
+  Probe (fun ~indentation ~bol ~line ~column -> f column)
 
 let nesting f =
-  Nesting f
+  Probe (fun ~indentation ~bol ~line ~column -> f indentation)
+
+let position f =
+  Probe (fun ~indentation ~bol ~line ~column -> f ~bol ~line ~column)
 
 let ifflat x y =
   IfFlat (x, y)
+
+let probe fn = empty
 
 (* ------------------------------------------------------------------------- *)
 
@@ -294,40 +293,42 @@ type output =
 
 type 'channel state = {
 
-    (* The line width and ribbon width. *)
+  (* The line width and ribbon width. *)
 
-    width: int;
-    ribbon: int;
+  width: int;
+  ribbon: int;
 
-    (* The output channel. *)
+  (* The output channel. *)
 
-    channel: 'channel;
+  channel: 'channel;
 
-    (* The current indentation level. This is the number of blanks that
-       were printed at the beginning of the current line. *)
+  (* The current indentation level. This is the number of blanks that
+     were printed at the beginning of the current line. *)
 
-    mutable indentation: int;
+  mutable indentation: int;
 
-    (* The current column. *)
+  (* The current position in the buffer. *)
 
-    mutable column: int;
+  mutable bol: int;
+  mutable line: int;
+  mutable column: int;
 
-    (* The renderer's input. For efficiency, the input is assumed to never be
-       empty, and the leading [ICons] constructor is inlined within the state
-       record. In other words, the fields [nest1], [flatten1], and [input1]
-       concern the first input document, and the field [input] contains the
-       rest of the input sequence. *)
+  (* The renderer's input. For efficiency, the input is assumed to never be
+     empty, and the leading [ICons] constructor is inlined within the state
+     record. In other words, the fields [nest1], [flatten1], and [input1]
+     concern the first input document, and the field [input] contains the
+     rest of the input sequence. *)
 
-    mutable indent1: int;
-    mutable flatten1: bool;
-    mutable input1: document;
-    mutable input: input;
+  mutable indent1: int;
+  mutable flatten1: bool;
+  mutable input1: document;
+  mutable input: input;
 
-    (* The renderer's buffer output. *)
+  (* The renderer's buffer output. *)
 
-    mutable output: output;
+  mutable output: output;
 
-  }
+}
 
 (* The renderer maintains a stack of resumptions, that is, states in which
    execution should be resumed if the current thread of execution fails by
@@ -341,7 +342,7 @@ type 'channel state = {
    one when flattening mode is on. *)
 
 type 'channel stack =
-    'channel state list
+  'channel state list
 
 (* ------------------------------------------------------------------------- *)
 
@@ -355,9 +356,9 @@ module Renderer (Output : OUTPUT) = struct
       Output.channel
 
   type dummy =
-      document
+    document
   type document =
-      dummy
+    dummy
 
   (* Printing blank space (indentation characters). *)
 
@@ -384,16 +385,16 @@ module Renderer (Output : OUTPUT) = struct
 
   let rec commit channel = function
     | OEmpty ->
-	()
+        ()
     | OChar (c, output) ->
-	commit channel output;
-	Output.char channel c
+        commit channel output;
+        Output.char channel c
     | OString (s, ofs, len, output) ->
-	commit channel output;
-	Output.substring channel s ofs len
+        commit channel output;
+        Output.substring channel s ofs len
     | OBlank (n, output) ->
-	commit channel output;
-	blanks channel n
+        commit channel output;
+        blanks channel n
 
   (* The renderer's abstract machine. *)
 
@@ -427,21 +428,21 @@ module Renderer (Output : OUTPUT) = struct
        and continue. *)
 
     | Empty, _ ->
-	shift stack state
+        shift stack state
 
     (* The first piece of input is a character. Emit it and continue. *)
 
     | Char c, _ ->
-	emit_char stack state c
+        emit_char stack state c
 
     (* The first piece of input is a string. Emit it and continue. *)
 
     | String (s, ofs, len), _ ->
-	emit_string stack state s ofs len len
+        emit_string stack state s ofs len len
     | FancyString (s, ofs, len, apparent_length), _ ->
-	emit_string stack state s ofs len apparent_length
+        emit_string stack state s ofs len apparent_length
     | Blank n, _ ->
-	emit_blanks stack state n
+        emit_blanks stack state n
 
     (* The first piece of input is a hard newline instruction. *)
 
@@ -452,13 +453,15 @@ module Renderer (Output : OUTPUT) = struct
        current piece of input and continue. *)
 
     | HardLine, false ->
-	assert (stack = []);     (* since flattening mode is off, the stack must be empty. *)
-	Output.char state.channel '\n';
-	let i = state.indent1 in
-	blanks state.channel i;
-	state.column <- i;
-	state.indentation <- i;
-	shift stack state
+        assert (stack = []);     (* since flattening mode is off, the stack must be empty. *)
+        Output.char state.channel '\n';
+        let i = state.indent1 in
+        blanks state.channel i;
+        state.line <- state.line + 1;
+        state.bol <- state.bol + state.column + 1;
+        state.column <- i;
+        state.indentation <- i;
+        shift stack state
 
     (* If flattening mode is on, then [HardLine] causes an immediate failure. We
        backtrack all the way to the state found at the bottom of the stack.
@@ -475,24 +478,24 @@ module Renderer (Output : OUTPUT) = struct
 
     | IfFlat (doc, _), true
     | IfFlat (_, doc), false ->
-	state.input1 <- doc;
-	run stack state
+        state.input1 <- doc;
+        run stack state
 
     (* The first piece of input is a concatenation operator. We take it
        apart and queue both documents in the input sequence. *)
 
     | Cat (doc1, doc2), _ ->
-	state.input1 <- doc1;
-	state.input <- ICons (state.indent1, state.flatten1, doc2, state.input);
-	run stack state
+        state.input1 <- doc1;
+        state.input <- ICons (state.indent1, state.flatten1, doc2, state.input);
+        run stack state
 
     (* The first piece of input is a [Nest] operator. We increase the amount
        of indentation to be applied to the first input document. *)
 
     | Nest (j, doc), _ ->
-	state.indent1 <- state.indent1 + j;
-	state.input1 <- doc;
-	run stack state
+        state.indent1 <- state.indent1 + j;
+        state.input1 <- doc;
+        run stack state
 
     (* The first piece of input is a [Group] operator, and flattening mode
        is currently off. This introduces a choice point: either we flatten
@@ -506,30 +509,27 @@ module Renderer (Output : OUTPUT) = struct
        modifications. This is a fork. *)
 
     | Group doc, false ->
-	state.input1 <- doc;
-	run (state :: stack) { state with flatten1 = true }
+        state.input1 <- doc;
+        run (state :: stack) { state with flatten1 = true }
 
     (* The first piece of input is a [Group] operator, and flattening mode
        is currently on. The operator is ignored. *)
 
     | Group doc, true ->
-	state.input1 <- doc;
-	run stack state
+        state.input1 <- doc;
+        run stack state
 
-    (* The first piece of input is a [Column] operator. The current column
-       is fed into it, so as to produce a document, with which we continue. *)
+    (* The first piece of input is a [Probe] operator. The current
+       indentation and position is fed into it, so as to produce a
+       document, with which we continue. *)
 
-    | Column f, _ ->
-	state.input1 <- f state.column;
-	run stack state
-
-    (* The first piece of input is a [Column] operator. The current
-       indentation level is fed into it, so as to produce a document, with
-       which we continue. *)
-
-    | Nesting f, _ ->
-	state.input1 <- f state.indentation;
-	run stack state
+    | Probe f, _ ->
+        state.input1 <-
+          f ~indentation:state.indentation
+            ~bol:state.bol
+            ~line:state.line
+            ~column:state.column;
+        run stack state
 
   (* [shift] discards the first document in the input sequence, so that the
      second input document, if there is one, becomes first. The renderer stops
@@ -549,41 +549,41 @@ module Renderer (Output : OUTPUT) = struct
     | resumption :: stack
       when state.column > state.width
         || state.column - state.indentation > state.ribbon ->
-	run stack resumption
+        run stack resumption
     | _ ->
 
-	match state.input with
-	| INil ->
+        match state.input with
+        | INil ->
 
-	    (* End of input. Commit any buffered output and stop. *)
+            (* End of input. Commit any buffered output and stop. *)
 
-	    commit state.channel state.output
+            commit state.channel state.output
 
-	| ICons (indent, flatten, head, tail) ->
+        | ICons (indent, flatten, head, tail) ->
 
-	    (* There is an input document. Move it one slot ahead and
-	       check if we are leaving flattening mode. *)
+            (* There is an input document. Move it one slot ahead and
+               check if we are leaving flattening mode. *)
 
-	    state.indent1 <- indent;
-	    state.input1 <- head;
-	    state.input <- tail;
-	    if state.flatten1 && not flatten then begin
+            state.indent1 <- indent;
+            state.input1 <- head;
+            state.input <- tail;
+            if state.flatten1 && not flatten then begin
 
-	      (* Leaving flattening mode means success: we have flattened
-		 a certain group, and fitted it all on a line, without
-		 reaching a failure point. We would now like to commit our
-		 decision to flatten this group. This is a Prolog cut. We
-		 discard the stack of choice points, replacing it with an
-		 empty stack, and commit all buffered output. *)
+              (* Leaving flattening mode means success: we have flattened
+                 a certain group, and fitted it all on a line, without
+                 reaching a failure point. We would now like to commit our
+                 decision to flatten this group. This is a Prolog cut. We
+                 discard the stack of choice points, replacing it with an
+                 empty stack, and commit all buffered output. *)
 
-	      state.flatten1 <- flatten; (* false *)
-	      commit state.channel state.output;
-	      state.output <- OEmpty;
-	      run [] state
+              state.flatten1 <- flatten; (* false *)
+              commit state.channel state.output;
+              state.output <- OEmpty;
+              run [] state
 
-	    end
-	    else
-	      run stack state
+            end
+            else
+              run stack state
 
   (* [emit_char] prints a character (either to the output channel or to the
      output buffer), increments the current column, discards the first piece
@@ -592,9 +592,9 @@ module Renderer (Output : OUTPUT) = struct
   and emit_char stack state c =
     begin match stack with
     | [] ->
-	Output.char state.channel c
+        Output.char state.channel c
     | _ ->
-	state.output <- OChar (c, state.output)
+        state.output <- OChar (c, state.output)
     end;
     state.column <- state.column + 1;
     shift stack state
@@ -606,9 +606,9 @@ module Renderer (Output : OUTPUT) = struct
   and emit_string stack state s ofs len apparent_length =
     begin match stack with
     | [] ->
-	Output.substring state.channel s ofs len
+        Output.substring state.channel s ofs len
     | _ ->
-	state.output <- OString (s, ofs, len, state.output)
+        state.output <- OString (s, ofs, len, state.output)
     end;
     state.column <- state.column + apparent_length;
     shift stack state
@@ -620,9 +620,9 @@ module Renderer (Output : OUTPUT) = struct
   and emit_blanks stack state n =
     begin match stack with
     | [] ->
-	blanks state.channel n
+        blanks state.channel n
     | _ ->
-	state.output <- OBlank (n, state.output)
+        state.output <- OBlank (n, state.output)
     end;
     state.column <- state.column + n;
     shift stack state
@@ -635,6 +635,8 @@ module Renderer (Output : OUTPUT) = struct
       ribbon = max 0 (min width (truncate (float_of_int width *. rfrac)));
       channel = channel;
       indentation = 0;
+      bol = 0;
+      line = 1;
       column = 0;
       indent1 = 0;
       flatten1 = false;
@@ -643,9 +645,9 @@ module Renderer (Output : OUTPUT) = struct
       output = OEmpty;
     }
 
-(* ------------------------------------------------------------------------- *)
+  (* ------------------------------------------------------------------------- *)
 
-(* The compact rendering algorithm. *)
+  (* The compact rendering algorithm. *)
 
   let compact channel document =
 
@@ -655,33 +657,31 @@ module Renderer (Output : OUTPUT) = struct
 
     let rec scan = function
       | Empty ->
-	  ()
+          ()
       | Char c ->
-	  Output.char channel c;
-	  column := !column + 1
+          Output.char channel c;
+          column := !column + 1
       | String (s, ofs, len) ->
-	  Output.substring channel s ofs len;
-	  column := !column + len
+          Output.substring channel s ofs len;
+          column := !column + len
       | FancyString (s, ofs, len, apparent_length) ->
-	  Output.substring channel s ofs len;
-	  column := !column + apparent_length
+          Output.substring channel s ofs len;
+          column := !column + apparent_length
       | Blank n ->
-	  blanks channel n;
-	  column := !column + n
+          blanks channel n;
+          column := !column + n
       | HardLine ->
-	  Output.char channel '\n';
-	  column := 0
+          Output.char channel '\n';
+          column := 0
       | Cat (doc1, doc2) ->
-	  scan doc1;
-	  scan doc2
+          scan doc1;
+          scan doc2
       | IfFlat (doc, _)
       | Nest (_, doc)
       | Group doc ->
-	  scan doc
-      | Column f ->
-	  scan (f !column)
-      | Nesting f ->
-	  scan (f 0)
+          scan doc
+      | Probe f ->
+          scan (f ~indentation:0 ~bol:0 ~line:1 ~column:!column)
     in
 
     scan document

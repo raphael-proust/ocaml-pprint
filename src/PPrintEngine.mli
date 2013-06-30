@@ -100,6 +100,15 @@ val column: (int -> document) -> document
     characters that were inserted at the beginning of the current line. *)
 val nesting: (int -> document) -> document
 
+(** [position f] is the document obtained by applying the function [f]
+    to the current position in the rendered output. The position
+    consists of [bol], which is the character-offset of the beginnig
+    of the current line (starting at 0), [line], which is the current
+    line (starting at 1), and [column], which is the current column
+    (starting at 0). The current character-offset is always given by
+    [bol + column]. *)
+val position : (bol:int -> line:int -> column:int -> document) -> document
+
 (** [ifflat doc1 doc2] is rendered as [doc1] if part of a group that can be
     successfully flattened, and is rendered as [doc2] otherwise. Use this
     operation with caution. Because the pretty-printer is free to choose
@@ -123,4 +132,3 @@ module ToBuffer : PPrintRenderer.RENDERER
 module ToFormatter : PPrintRenderer.RENDERER
   with type channel = Format.formatter
    and type document = document
-
